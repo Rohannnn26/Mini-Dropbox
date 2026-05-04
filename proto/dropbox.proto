@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package dropbox;
+
+// Master Service - coordinates storage nodes and file metadata
+service MasterService {
+    // Register a storage node with the master
+    rpc RegisterNode(RegisterRequest) returns (RegisterResponse);
+    
+    // Request storage targets for uploading chunks
+    rpc RequestPutTargets(PutTargetsRequest) returns (PutTargetsResponse);
+    
+    // Announce file manifest after upload
+    rpc AnnounceManifest(ManifestRequest) returns (ManifestResponse);
+    
+    // List all files
+    rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
+    
+    // Get manifest for a specific file
+    rpc GetManifest(GetManifestRequest) returns (GetManifestResponse);
+    
+    // Request storage locations for retrieving chunks
+    rpc RequestGetTargets(GetTargetsRequest) returns (GetTargetsResponse);
+}
+
+// Storage Node Service - handles chunk storage
+service StorageService {
+    // Store a chunk
+    rpc PutChunk(PutChunkRequest) returns (PutChunkResponse);
+    
+    // Retrieve a chunk
+    rpc GetChunk(GetChunkRequest) returns (GetChunkResponse);
+}
+
+// Messages for Master Service
+
+message RegisterRequest {
+    string host = 1;
+    int32 port = 2;
+    string node_id = 3;
+}
+
+message RegisterResponse {
+    string status = 1;
+    string message = 2;
+}
+
+message PutTargetsRequest {
+    string chunk_id = 1;
+}
+
+message StorageNode {
+    string host = 1;
+    int32 port = 2;
+    string node_id = 3;
+}
+
+message PutTargetsResponse {
+    repeated StorageNode targets = 1;
+}
+
+message ManifestRequest {
+    string filename = 1;
+    repeated string chunks = 2;
+}
+
+message ManifestResponse {
+    string status = 1;
+    string message = 2;
+}
+
+message ListFilesRequest {
+}
+
+message ListFilesResponse {
+    repeated string files = 1;
+}
+
+message GetManifestRequest {
+    string filename = 1;
+}
+
+message GetManifestResponse {
+    repeated string chunks = 1;
+}
+
+message GetTargetsRequest {
+    string chunk_id = 1;
+}
+
+message GetTargetsResponse {
+    repeated StorageNode targets = 1;
+}
+
+// Messages for Storage Service
+
+message PutChunkRequest {
+    string chunk_id = 1;
+    bytes data = 2;
+    int32 version = 3;
+}
+
+message PutChunkResponse {
+    string status = 1;
+    string message = 2;
+}
+
+message GetChunkRequest {
+    string chunk_id = 1;
+}
+
+message GetChunkResponse {
+    string status = 1;
+    bytes data = 2;
+    string message = 3;
+}

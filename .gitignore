@@ -1,0 +1,31 @@
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Logs
+*.log
+web_api/logs/
+
+# Node stores (generated chunks)
+node1_store/
+node2_store/
+
+# Web UI build artifacts
+web/node_modules/
+web/dist/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Local env files
+.env
+.env.*
+
+# Outputs
+*_out.*
