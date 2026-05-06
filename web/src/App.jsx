@@ -14,6 +14,8 @@ const formatBytes = (value) => {
   return `${size.toFixed(2)} ${units[idx]}`;
 };
 
+const formatTime = (value) => (value ? value.toLocaleTimeString() : "Not yet");
+
 export default function App() {
   const [status, setStatus] = useState(null);
   const [analysis, setAnalysis] = useState(null);
@@ -21,8 +23,54 @@ export default function App() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
+  const [search, setSearch] = useState("");
+  const [verifyReport, setVerifyReport] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   const apiOnline = useMemo(() => !!status, [status]);
+  const masterRunning = status?.master?.running ?? false;
+  const nodeCount = status?.nodes?.length ?? 0;
+  const nodesRunning = status?.nodes?.filter((node) => node.running).length ?? 0;
+  const serviceTotal = 1 + nodeCount;
+  const availability = status
+    ? Math.round(((masterRunning ? 1 : 0) + nodesRunning) / serviceTotal * 100)
+    : 0;
+  const masterLabel = status ? (masterRunning ? "Running" : "Stopped") : "Unknown";
+  const nodesLabel = status ? `${nodesRunning}/${nodeCount}` : "-";
+
+  const storageTotalBytes = analysis
+    ? analysis.node1.size_bytes + analysis.node2.size_bytes
+    : 0;
+
+  const replication =
+    analysis && analysis.unique_chunks
+      ? (analysis.total_chunks / analysis.unique_chunks).toFixed(2)
+      : "-";
+
+  const fileEntries = useMemo(() => {
+    if (analysis?.files?.length) {
+      return analysis.files.map((entry) => ({
+        name: entry.name,
+        chunks: entry.chunks
+      }));
+    }
+    return files.map((name) => ({ name, chunks: null }));
+  }, [analysis, files]);
+
+  const filteredFiles = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return fileEntries;
+    return fileEntries.filter((entry) =>
+      entry.name.toLowerCase().includes(term)
+    );
+  }, [fileEntries, search]);
+
+  const node1Share = analysis && storageTotalBytes
+    ? Math.round((analysis.node1.size_bytes / storageTotalBytes) * 100)
+    : 0;
+  const node2Share = analysis && storageTotalBytes
+    ? Math.round((analysis.node2.size_bytes / storageTotalBytes) * 100)
+    : 0;
 
   const notify = (type, text) => {
     setMessage({ type, text });
@@ -58,6 +106,7 @@ export default function App() {
     try {
       setBusy(true);
       await Promise.all([loadStatus(), loadFiles(), loadAnalysis()]);
+      setLastUpdated(new Date());
     } catch (err) {
       notify("error", err.message || "API not reachable");
       setStatus(null);
@@ -141,155 +190,293 @@ export default function App() {
     }
   };
 
+  const runVerify = async () => {
+    try {
+      setBusy(true);
+      const result = await fetchJson("/api/verify");
+      setVerifyReport(result);
+      notify("success", "Integrity check complete");
+    } catch (err) {
+      notify("error", err.message || "Integrity check failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   useEffect(() => {
     refreshAll();
   }, []);
 
   return (
-    <div className="app">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">Mini-Dropbox Control Room</p>
-          <h1>Operate your distributed storage system with confidence.</h1>
-          <p className="subhead">
-            Launch services, upload files, and inspect replication health in one
-            place.
-          </p>
-        </div>
-        <div className="hero-actions">
-          <button className="primary" onClick={startSystem} disabled={busy}>
-            Start system
-          </button>
-          <button className="ghost" onClick={stopSystem} disabled={busy}>
-            Stop system
-          </button>
-          <button className="ghost" onClick={refreshAll} disabled={busy}>
-            Refresh
-          </button>
-        </div>
-      </header>
-
-      <main className="grid">
-        <section className="card status">
-          <div className="card-header">
-            <h2>Service status</h2>
-            <span className={`pill ${apiOnline ? "ok" : "warn"}`}>
-              API {apiOnline ? "online" : "offline"}
-            </span>
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="logo">MD</div>
+          <div>
+            <p className="brand-title">Mini Dropbox</p>
+            <p className="brand-sub">Cloud workspace</p>
           </div>
-          {status ? (
-            <div className="status-list">
-              <div className="status-row">
-                <div>
-                  <p className="label">Master</p>
-                  <p className="value">
-                    {status.master.host}:{status.master.port}
-                  </p>
-                </div>
-                <span className={`pill ${status.master.running ? "ok" : "warn"}`}>
-                  {status.master.running ? "Running" : "Stopped"}
+        </div>
+
+        <div className="sidebar-status">
+          <span className={`status-dot ${apiOnline ? "ok" : "warn"}`} />
+          <div>
+            <p className="label">API status</p>
+            <p className="value">{apiOnline ? "Online" : "Offline"}</p>
+            <p className="muted">{API_BASE}</p>
+          </div>
+        </div>
+
+        <nav className="nav">
+          <p className="nav-label">Console</p>
+          <button className="nav-item active" type="button">
+            Dashboard
+          </button>
+          <button className="nav-item" type="button">
+            Files
+          </button>
+          <button className="nav-item" type="button">
+            Health
+          </button>
+          <button className="nav-item" type="button">
+            Analytics
+          </button>
+        </nav>
+
+        <div className="sidebar-card">
+          <p className="label">Cluster health</p>
+          <p className="value">
+            {status ? `${availability}% availability` : "Unknown"}
+          </p>
+          <div className="progress">
+            <span style={{ width: `${availability}%` }} />
+          </div>
+          <p className="muted">Master: {masterLabel}</p>
+          <p className="muted">Nodes: {nodesLabel} online</p>
+          <p className="muted">Last refresh: {formatTime(lastUpdated)}</p>
+        </div>
+      </aside>
+
+      <div className="main">
+        <header className="topbar">
+          <div className="topbar-title">
+            <p className="eyebrow">Local cloud workspace</p>
+            <h1>Mini-Dropbox Cloud Console</h1>
+            <p className="subhead">
+              Start services, ship files, and inspect replication health in one
+              console.
+            </p>
+          </div>
+          <div className="topbar-panel">
+            <div className="search-field">
+              <input
+                type="search"
+                placeholder="Search stored files"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </div>
+            <div className="action-row">
+              <button className="primary" onClick={startSystem} disabled={busy}>
+                Start system
+              </button>
+              <button className="ghost" onClick={stopSystem} disabled={busy}>
+                Stop system
+              </button>
+              <button className="ghost" onClick={refreshAll} disabled={busy}>
+                Refresh
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <section className="summary-grid">
+          <article className="card summary" style={{ "--delay": "0ms" }}>
+            <p className="label">Availability</p>
+            <p className="value">{status ? `${availability}%` : "--"}</p>
+            <p className="muted">Master and nodes online</p>
+          </article>
+          <article className="card summary" style={{ "--delay": "80ms" }}>
+            <p className="label">Replication</p>
+            <p className="value">{replication}x</p>
+            <p className="muted">Total vs unique chunks</p>
+          </article>
+          <article className="card summary" style={{ "--delay": "160ms" }}>
+            <p className="label">Stored data</p>
+            <p className="value">{formatBytes(storageTotalBytes)}</p>
+            <p className="muted">Across node stores</p>
+          </article>
+          <article className="card summary" style={{ "--delay": "240ms" }}>
+            <p className="label">Files</p>
+            <p className="value">{fileEntries.length}</p>
+            <p className="muted">Total manifests</p>
+          </article>
+        </section>
+
+        <section className="content-grid">
+          <div className="column">
+            <section className="card table" style={{ "--delay": "120ms" }}>
+              <div className="card-header">
+                <h2>Files</h2>
+                <span className="pill info">
+                  {filteredFiles.length} shown
                 </span>
               </div>
-              {status.nodes.map((node) => (
-                <div className="status-row" key={node.name}>
-                  <div>
-                    <p className="label">{node.name.toUpperCase()}</p>
-                    <p className="value">
-                      {node.host}:{node.port}
-                    </p>
+              {filteredFiles.length ? (
+                <div className="table">
+                  <div className="table-head">
+                    <span>Name</span>
+                    <span>Chunks</span>
+                    <span>Action</span>
                   </div>
-                  <span className={`pill ${node.running ? "ok" : "warn"}`}>
-                    {node.running ? "Running" : "Stopped"}
-                  </span>
+                  {filteredFiles.map((entry) => (
+                    <div className="table-row" key={entry.name}>
+                      <div className="table-cell">
+                        <p className="value">{entry.name}</p>
+                        <p className="muted">Ready for download</p>
+                      </div>
+                      <span className="chip">
+                        {entry.chunks !== null ? entry.chunks : "-"}
+                      </span>
+                      <button
+                        className="ghost"
+                        onClick={() => downloadFile(entry.name)}
+                        disabled={busy}
+                      >
+                        Download
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="muted">API offline. Start the backend to see status.</p>
-          )}
-        </section>
+              ) : (
+                <p className="muted">No files stored yet.</p>
+              )}
+            </section>
 
-        <section className="card upload">
-          <div className="card-header">
-            <h2>Upload a file</h2>
-            <span className="pill info">64 KB chunks</span>
+            <section className="card activity" style={{ "--delay": "200ms" }}>
+              <div className="card-header">
+                <h2>Activity</h2>
+                <span className="pill info">Local cluster</span>
+              </div>
+              <div className="activity-list">
+                <div className="activity-item">
+                  <p className="value">No recent events</p>
+                  <p className="muted">
+                    Run uploads or downloads to populate activity.
+                  </p>
+                </div>
+              </div>
+            </section>
           </div>
-          <div className="upload-box">
-            <input
-              type="file"
-              id="file-input"
-              onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
-            />
-            <label htmlFor="file-input" className="file-label">
-              {selectedFile ? selectedFile.name : "Choose a file"}
-            </label>
-          </div>
-          <button className="primary" onClick={uploadFile} disabled={busy}>
-            Upload
-          </button>
-        </section>
 
-        <section className="card files">
-          <div className="card-header">
-            <h2>Stored files</h2>
-            <span className="pill info">{files.length} total</span>
-          </div>
-          {files.length ? (
-            <div className="file-list">
-              {files.map((name) => (
-                <div className="file-row" key={name}>
-                  <div>
-                    <p className="value">{name}</p>
-                    <p className="muted">Ready for download</p>
+          <div className="column">
+            <section className="card upload" style={{ "--delay": "160ms" }}>
+              <div className="card-header">
+                <h2>Upload</h2>
+                <span className="pill info">64 KB chunks</span>
+              </div>
+              <div className="upload-zone">
+                <input
+                  type="file"
+                  id="file-input"
+                  onChange={(event) =>
+                    setSelectedFile(event.target.files?.[0] || null)
+                  }
+                />
+                <label htmlFor="file-input" className="file-label">
+                  {selectedFile ? selectedFile.name : "Choose a file"}
+                </label>
+                <p className="upload-meta">
+                  {selectedFile
+                    ? formatBytes(selectedFile.size)
+                    : "Upload any file type"}
+                </p>
+              </div>
+              <button className="primary" onClick={uploadFile} disabled={busy}>
+                Upload
+              </button>
+            </section>
+
+            <section className="card nodes" style={{ "--delay": "240ms" }}>
+              <div className="card-header">
+                <h2>Storage nodes</h2>
+                <span className="pill info">Replication view</span>
+              </div>
+              {analysis ? (
+                <div className="node-list">
+                  <div className="node-row">
+                    <div>
+                      <p className="label">Node 1</p>
+                      <p className="value">{analysis.node1.count} chunks</p>
+                      <p className="muted">
+                        {formatBytes(analysis.node1.size_bytes)}
+                      </p>
+                    </div>
+                    <div className="progress small">
+                      <span style={{ width: `${node1Share}%` }} />
+                    </div>
                   </div>
-                  <button
-                    className="ghost"
-                    onClick={() => downloadFile(name)}
-                    disabled={busy}
-                  >
-                    Download
-                  </button>
+                  <div className="node-row">
+                    <div>
+                      <p className="label">Node 2</p>
+                      <p className="value">{analysis.node2.count} chunks</p>
+                      <p className="muted">
+                        {formatBytes(analysis.node2.size_bytes)}
+                      </p>
+                    </div>
+                    <div className="progress small">
+                      <span style={{ width: `${node2Share}%` }} />
+                    </div>
+                  </div>
+                  <div className="node-row compact">
+                    <div>
+                      <p className="label">Unique chunks</p>
+                      <p className="value">{analysis.unique_chunks}</p>
+                    </div>
+                    <div>
+                      <p className="label">Total chunks</p>
+                      <p className="value">{analysis.total_chunks}</p>
+                    </div>
+                  </div>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="muted">No files stored yet.</p>
-          )}
-        </section>
+              ) : (
+                <p className="muted">Storage data not available.</p>
+              )}
+            </section>
 
-        <section className="card analysis">
-          <div className="card-header">
-            <h2>Storage analysis</h2>
-            <span className="pill info">Replication view</span>
+            <section className="card verify" style={{ "--delay": "320ms" }}>
+              <div className="card-header">
+                <h2>Integrity check</h2>
+                <span className="pill info">SHA-256</span>
+              </div>
+              <p className="muted">
+                Run a quick replica comparison across storage nodes.
+              </p>
+              <button className="ghost" onClick={runVerify} disabled={busy}>
+                Run integrity check
+              </button>
+              {verifyReport ? (
+                <div className="verify-grid">
+                  <div>
+                    <p className="label">Verified</p>
+                    <p className="value">{verifyReport.match}</p>
+                  </div>
+                  <div>
+                    <p className="label">Incomplete</p>
+                    <p className="value">{verifyReport.incomplete}</p>
+                  </div>
+                  <div>
+                    <p className="label">Mismatched</p>
+                    <p className="value">{verifyReport.mismatch}</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="muted">No report yet.</p>
+              )}
+            </section>
           </div>
-          {analysis ? (
-            <div className="analysis-grid">
-              <div>
-                <p className="label">Node 1</p>
-                <p className="value">{analysis.node1.count} chunks</p>
-                <p className="muted">{formatBytes(analysis.node1.size_bytes)}</p>
-              </div>
-              <div>
-                <p className="label">Node 2</p>
-                <p className="value">{analysis.node2.count} chunks</p>
-                <p className="muted">{formatBytes(analysis.node2.size_bytes)}</p>
-              </div>
-              <div>
-                <p className="label">Unique chunks</p>
-                <p className="value">{analysis.unique_chunks}</p>
-                <p className="muted">Across all nodes</p>
-              </div>
-              <div>
-                <p className="label">Total chunks</p>
-                <p className="value">{analysis.total_chunks}</p>
-                <p className="muted">Replicated copies</p>
-              </div>
-            </div>
-          ) : (
-            <p className="muted">No analysis available.</p>
-          )}
         </section>
-      </main>
+      </div>
 
       {message ? (
         <div className={`toast ${message.type}`}>{message.text}</div>
